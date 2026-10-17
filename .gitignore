@@ -1,0 +1,17 @@
+# ข้อมูลส่วนตัว/ข้อมูลจริง ห้ามขึ้น git
+config.json
+branches.csv
+*.pdf
+*.xlsx
+*.csv
+!branches.example.csv
+
+# ไฟล์ชั่วคราว
+preview_*
+__pycache__/
+*.pyc
+build/
+dist/
+*.exe
+*.spec
+.venv/
