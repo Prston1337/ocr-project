@@ -1,15 +1,30 @@
-"""หน้าต่างโปรแกรม: เลือก PDF -> ตรวจรายการ -> สร้าง .xlsx (ใบวางบิล + ใบส่งของ)"""
+"""หน้าต่างโปรแกรม (ธีม Dark สไตล์ Quantix): เลือก PDF -> ตรวจรายการ -> สร้าง .xlsx"""
 import os
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+import customtkinter as ctk
+
 import invoice_to_xlsx as core
 
-FONT = ("Tahoma", 10)
-FONT_BOLD = ("Tahoma", 10, "bold")
-FONT_BIG = ("Tahoma", 12, "bold")
+# ---- design tokens (ตามธีม Dark ที่ตกลงไว้) ----
+BG = "#08080B"
+SIDEBAR = "#0C0C11"
+CARD = "#101016"
+CARD_2 = "#15151C"
+BORDER = "#1F1F29"
+TEXT = "#ECECF1"
+MUTED = "#8B8B9B"
+ACCENT = "#5B6CF0"
+ACCENT_HOVER = "#6C7BF5"
+ACCENT_SOFT = "#1B1D3A"
+OK_BG, OK_FG = "#10301F", "#5FD38D"
+WARN_BG, WARN_FG = "#352A0E", "#F2C14E"
+BAD_BG, BAD_FG = "#381518", "#F0707A"
+FAMILY = "Leelawadee UI"
+
 CFG_LABELS = [
     ("sender_name", "ชื่อผู้ส่งของ"),
     ("sender_address", "ที่อยู่ผู้ส่งของ"),
@@ -18,76 +33,184 @@ CFG_LABELS = [
     ("customer_company", "ชื่อบริษัทที่ส่งสินค้าให้"),
 ]
 
+ctk.set_appearance_mode("dark")
 
-class App(tk.Tk):
+
+def font(size=13, bold=False):
+    return ctk.CTkFont(family=FAMILY, size=size, weight="bold" if bold else "normal")
+
+
+def card(parent, **kw):
+    return ctk.CTkFrame(parent, fg_color=CARD, border_width=1, border_color=BORDER, corner_radius=14, **kw)
+
+
+def primary_btn(parent, text, command, **kw):
+    return ctk.CTkButton(parent, text=text, command=command, font=font(13, True), fg_color=ACCENT,
+                         hover_color=ACCENT_HOVER, text_color="#FFFFFF", corner_radius=10, height=38, **kw)
+
+
+def ghost_btn(parent, text, command, **kw):
+    return ctk.CTkButton(parent, text=text, command=command, font=font(13), fg_color=CARD_2, hover_color="#1D1D27",
+                         border_width=1, border_color=BORDER, text_color=TEXT, corner_radius=10, height=38, **kw)
+
+
+def entry(parent, var, **kw):
+    return ctk.CTkEntry(parent, textvariable=var, font=font(13), fg_color=CARD_2, border_color=BORDER,
+                        text_color=TEXT, corner_radius=10, height=38, **kw)
+
+
+class App(ctk.CTk):
     def __init__(self):
-        super().__init__()
+        super().__init__(fg_color=BG)
         self.title("แปลงใบรับสินค้า → ใบวางบิล / ใบส่งของ")
-        self.geometry("1020x680")
-        self.minsize(880, 560)
-        style = ttk.Style(self)
-        style.configure(".", font=FONT)
-        style.configure("Treeview", font=FONT, rowheight=24)
-        style.configure("Treeview.Heading", font=FONT_BOLD)
-        style.configure("Accent.TButton", font=FONT_BOLD)
+        self.geometry("1180x740")
+        self.minsize(1000, 640)
+        self._style_tree()
 
         self.pdf_path = None
         self.invs = []
         self.branches = core.read_branches()
         self.cfg_ok = False
 
-        nb = self.nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=10, pady=10)
-        self.tab_run, self.tab_br, self.tab_cfg = ttk.Frame(nb), ttk.Frame(nb), ttk.Frame(nb)
-        nb.add(self.tab_run, text="  สกัดเอกสาร  ")
-        nb.add(self.tab_br, text="  สาขา  ")
-        nb.add(self.tab_cfg, text="  ตั้งค่า  ")
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
+        self._build_sidebar()
+        self.main = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
+        self.main.grid(row=0, column=1, sticky="nsew")
+        self.main.columnconfigure(0, weight=1)
+        self.main.rowconfigure(0, weight=1)
+        self.pages = {}
         self._build_run()
         self._build_branches()
         self._build_config()
+        self.show("run")
         self._load_cfg(initial=True)
 
-    # ------------------------------------------------------------ tab 1
+    # ------------------------------------------------------------ shell
+    def _style_tree(self):
+        st = ttk.Style(self)
+        st.theme_use("clam")
+        st.configure("Dark.Treeview", background=CARD, fieldbackground=CARD, foreground=TEXT, borderwidth=0,
+                     rowheight=34, font=(FAMILY, 10), relief="flat")
+        st.configure("Dark.Treeview.Heading", background=CARD, foreground=MUTED, borderwidth=0,
+                     font=(FAMILY, 10), relief="flat", padding=(8, 10))
+        st.map("Dark.Treeview", background=[("selected", ACCENT_SOFT)], foreground=[("selected", TEXT)])
+        st.map("Dark.Treeview.Heading", background=[("active", CARD)])
+        st.layout("Dark.Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
+        st.configure("Dark.Vertical.TScrollbar", background=BORDER, troughcolor=CARD, bordercolor=CARD,
+                     arrowcolor=MUTED, lightcolor=CARD, darkcolor=CARD, gripcount=0)
+
+    def _build_sidebar(self):
+        sb = ctk.CTkFrame(self, fg_color=SIDEBAR, corner_radius=0, width=250, border_width=0)
+        sb.grid(row=0, column=0, sticky="nsew")
+        sb.grid_propagate(False)
+        ctk.CTkFrame(self, fg_color=BORDER, width=1, corner_radius=0).grid(row=0, column=0, sticky="nse")
+
+        ctk.CTkLabel(sb, text="Invoice → Xlsx", font=font(18, True), text_color=TEXT, anchor="w").pack(
+            fill="x", padx=24, pady=(28, 0))
+        ctk.CTkLabel(sb, text="ใบวางบิล / ใบส่งของ", font=font(11), text_color=MUTED, anchor="w").pack(
+            fill="x", padx=24, pady=(0, 18))
+        ctk.CTkFrame(sb, fg_color=BORDER, height=1).pack(fill="x", padx=24)
+        ctk.CTkLabel(sb, text="เมนู", font=font(11), text_color=MUTED, anchor="w").pack(
+            fill="x", padx=24, pady=(22, 6))
+
+        self.nav = {}
+        for key, label in (("run", "สกัดเอกสาร"), ("branches", "สาขา"), ("config", "ตั้งค่า")):
+            b = ctk.CTkButton(sb, text="   " + label, anchor="w", height=44, corner_radius=10, font=font(14),
+                              fg_color="transparent", hover_color=CARD_2, text_color=MUTED, border_width=1,
+                              border_color=SIDEBAR, command=lambda k=key: self.show(k))
+            b.pack(fill="x", padx=16, pady=3)
+            self.nav[key] = b
+        ctk.CTkLabel(sb, text="v0.2.0 · Dark", font=font(10), text_color=MUTED, anchor="w").pack(
+            side="bottom", fill="x", padx=24, pady=20)
+
+    def show(self, key):
+        for k, p in self.pages.items():
+            if k == key:
+                p.grid(row=0, column=0, sticky="nsew")
+            else:
+                p.grid_remove()
+        for k, b in self.nav.items():
+            on = k == key
+            b.configure(fg_color=CARD_2 if on else "transparent", text_color=TEXT if on else MUTED,
+                        border_color=BORDER if on else SIDEBAR)
+
+    def _page(self, key, crumb, title):
+        p = ctk.CTkFrame(self.main, fg_color=BG, corner_radius=0)
+        p.columnconfigure(0, weight=1)
+        self.pages[key] = p
+        ctk.CTkLabel(p, text=f"ภาพรวม  /  {crumb}", font=font(12), text_color=MUTED, anchor="w").grid(
+            row=0, column=0, sticky="ew", padx=32, pady=(26, 0))
+        ctk.CTkLabel(p, text=title, font=font(26, True), text_color=TEXT, anchor="w").grid(
+            row=1, column=0, sticky="ew", padx=32, pady=(4, 14))
+        return p
+
+    def _tree(self, parent, cols, heads, widths, anchors=None):
+        box = tk.Frame(parent, bg=CARD)
+        tree = ttk.Treeview(box, columns=cols, show="headings", selectmode="browse", style="Dark.Treeview")
+        for i, (c, h, w) in enumerate(zip(cols, heads, widths)):
+            tree.heading(c, text=h, anchor="w")
+            tree.column(c, width=w, anchor=(anchors or {}).get(c, "w"))
+        sb = ttk.Scrollbar(box, orient="vertical", command=tree.yview, style="Dark.Vertical.TScrollbar")
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=6)
+        sb.pack(side="right", fill="y", pady=6)
+        return box, tree
+
+    # ------------------------------------------------------------ run page
     def _build_run(self):
-        f = self.tab_run
-        top = ttk.Frame(f)
-        top.pack(fill="x", padx=12, pady=(12, 6))
-        ttk.Button(top, text="1. เลือกไฟล์ PDF…", style="Accent.TButton", command=self.choose_pdf).pack(side="left")
-        self.lbl_file = ttk.Label(top, text="ยังไม่ได้เลือกไฟล์", foreground="#666")
-        self.lbl_file.pack(side="left", padx=12)
+        p = self._page("run", "สกัดเอกสาร", "นำเข้าใบรับสินค้า")
+        p.rowconfigure(5, weight=1)
 
-        self.lbl_sum = ttk.Label(f, text="", font=FONT_BIG)
-        self.lbl_sum.pack(anchor="w", padx=12, pady=(6, 2))
+        top = ctk.CTkFrame(p, fg_color="transparent")
+        top.grid(row=2, column=0, sticky="ew", padx=32)
+        primary_btn(top, "เลือกไฟล์ PDF…", self.choose_pdf, width=170).pack(side="left")
+        self.lbl_file = ctk.CTkLabel(top, text="ยังไม่ได้เลือกไฟล์", font=font(13), text_color=MUTED)
+        self.lbl_file.pack(side="left", padx=16)
 
-        cols = ("date", "branch", "no", "po", "items", "amount", "status")
-        heads = ("วันที่รับ", "สาขา", "เลขที่ใบรับสินค้า", "อ้างอิงใบสั่งซื้อ", "รายการ", "จำนวนเงิน", "สถานะ")
-        widths = (90, 260, 130, 130, 60, 100, 160)
-        box = ttk.Frame(f)
-        box.pack(fill="both", expand=True, padx=12, pady=6)
-        self.tree = ttk.Treeview(box, columns=cols, show="headings", selectmode="browse")
-        for c, h, w in zip(cols, heads, widths):
-            self.tree.heading(c, text=h)
-            self.tree.column(c, width=w, anchor="e" if c in ("amount", "items") else "w")
-        sb = ttk.Scrollbar(box, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=sb.set)
-        self.tree.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        self.tree.tag_configure("bad", background="#FFC7CE")
-        self.tree.tag_configure("warn", background="#FFF2CC")
+        stats = ctk.CTkFrame(p, fg_color="transparent")
+        stats.grid(row=3, column=0, sticky="ew", padx=32, pady=(16, 8))
+        for i in range(3):
+            stats.columnconfigure(i, weight=1, uniform="s")
+        self.stat = {}
+        for i, (key, label) in enumerate((("count", "ใบรับสินค้า"), ("total", "ยอดรวม (บาท)"),
+                                          ("check", "ต้องตรวจ"))):
+            c = card(stats)
+            c.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 8, 0 if i == 2 else 8))
+            ctk.CTkLabel(c, text=label, font=font(12), text_color=MUTED, anchor="w").pack(
+                fill="x", padx=20, pady=(16, 0))
+            v = ctk.CTkLabel(c, text="–", font=font(26, True), text_color=TEXT, anchor="w")
+            v.pack(fill="x", padx=20, pady=(2, 16))
+            self.stat[key] = v
 
-        self.warn_frame = ttk.Frame(f)
-        self.warn_frame.pack(fill="x", padx=12)
-        self.lbl_warn = ttk.Label(self.warn_frame, text="", foreground="#B00020", wraplength=720, justify="left")
-        self.lbl_warn.pack(side="left")
-        self.btn_goto = ttk.Button(self.warn_frame, text="ไปกรอกที่อยู่ที่แท็บสาขา",
-                                   command=lambda: self.nb.select(self.tab_br))
+        self.warn = ctk.CTkFrame(p, fg_color=WARN_BG, corner_radius=12, border_width=1, border_color="#4A3B14")
+        self.lbl_warn = ctk.CTkLabel(self.warn, text="", font=font(12), text_color=WARN_FG, anchor="w",
+                                     justify="left", wraplength=640)
+        self.lbl_warn.pack(side="left", padx=16, pady=10)
+        ctk.CTkButton(self.warn, text="ไปกรอกที่อยู่", width=120, height=30, font=font(12), corner_radius=8,
+                      fg_color="#4A3B14", hover_color="#5C4A1A", text_color=WARN_FG,
+                      command=lambda: self.show("branches")).pack(side="right", padx=12)
+        self.warn.grid(row=4, column=0, sticky="ew", padx=32, pady=(0, 8))
+        self.warn.grid_remove()
 
-        bottom = ttk.Frame(f)
-        bottom.pack(fill="x", padx=12, pady=12)
-        self.btn_make = ttk.Button(bottom, text="2. สร้างไฟล์ .xlsx…", style="Accent.TButton",
-                                   command=self.make_xlsx, state="disabled")
+        tc = card(p)
+        tc.grid(row=5, column=0, sticky="nsew", padx=32, pady=(0, 8))
+        tc.rowconfigure(0, weight=1)
+        tc.columnconfigure(0, weight=1)
+        box, self.tree = self._tree(
+            tc, ("date", "branch", "no", "po", "items", "amount", "status"),
+            ("วันที่รับ", "สาขา", "เลขที่ใบรับสินค้า", "อ้างอิงใบสั่งซื้อ", "รายการ", "จำนวนเงิน", "สถานะ"),
+            (100, 280, 140, 140, 70, 110, 140), {"amount": "e", "items": "e"})
+        box.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        self.tree.tag_configure("bad", background=BAD_BG, foreground=BAD_FG)
+        self.tree.tag_configure("warn", background=WARN_BG, foreground=WARN_FG)
+
+        bottom = ctk.CTkFrame(p, fg_color="transparent")
+        bottom.grid(row=6, column=0, sticky="ew", padx=32, pady=(4, 22))
+        self.btn_make = primary_btn(bottom, "สร้างไฟล์ .xlsx…", self.make_xlsx, width=190)
         self.btn_make.pack(side="right")
-        self.lbl_status = ttk.Label(bottom, text="", foreground="#666")
+        self.btn_make.configure(state="disabled")
+        self.lbl_status = ctk.CTkLabel(bottom, text="", font=font(12), text_color=MUTED)
         self.lbl_status.pack(side="left")
 
     def choose_pdf(self):
@@ -97,21 +220,20 @@ class App(tk.Tk):
             filetypes=[("PDF", "*.pdf"), ("ทุกไฟล์", "*.*")])
         if not path:
             return
-        self.lbl_status.config(text="กำลังอ่านไฟล์…")
-        self.btn_make.config(state="disabled")
+        self.lbl_status.configure(text="กำลังอ่านไฟล์…", text_color=MUTED)
+        self.btn_make.configure(state="disabled")
         self.update_idletasks()
         threading.Thread(target=self._read_thread, args=(path,), daemon=True).start()
 
     def _read_thread(self, path):
         try:
-            invs = core.read_invoices(path)
-            err = None
+            invs, err = core.read_invoices(path), None
         except Exception as e:  # noqa: BLE001
             invs, err = [], e
         self.after(0, self.load_result, path, invs, err)
 
     def load_result(self, path, invs, err):
-        self.lbl_status.config(text="")
+        self.lbl_status.configure(text="")
         if err is not None:
             messagebox.showerror("อ่านไฟล์ไม่ได้", f"{type(err).__name__}: {err}")
             return
@@ -119,8 +241,7 @@ class App(tk.Tk):
             messagebox.showwarning("ไม่พบใบรับสินค้า", "ไฟล์นี้ไม่มีหน้าที่เป็นใบรับสินค้า")
             return
         self.pdf_path, self.invs = path, invs
-        self.lbl_file.config(text=Path(path).name, foreground="#000")
-        # สาขาใหม่ที่ยังไม่มีในตาราง: เติมในหน้าสาขา (ยังไม่บันทึกจนกว่าจะสร้างไฟล์หรือกดบันทึก)
+        self.lbl_file.configure(text=Path(path).name, text_color=TEXT)
         for i in invs:
             if i["wh_code"] not in self.branches:
                 self.branches[i["wh_code"]] = (i["branch"], "")
@@ -130,37 +251,38 @@ class App(tk.Tk):
     def _refresh_preview(self):
         self.tree.delete(*self.tree.get_children())
         bad = set(core.mismatched(self.invs))
-        miss = {c for c, _ in core.missing_addresses(self.invs, self.branches)}
+        missing = core.missing_addresses(self.invs, self.branches)
+        miss = {c for c, _ in missing}
         for inv in sorted(self.invs, key=lambda i: (core.d_key(i["date"]), i["no"])):
             name = self.branches.get(inv["wh_code"], (inv["branch"], ""))[0]
             if inv["no"] in bad:
-                status, tag = "ยอดไม่ตรง", "bad"
+                status, tag = "● ยอดไม่ตรง", "bad"
             elif inv["wh_code"] in miss:
-                status, tag = "ขาดที่อยู่สาขา", "warn"
+                status, tag = "● ขาดที่อยู่สาขา", "warn"
             else:
-                status, tag = "ตรงกัน", ""
+                status, tag = "● ตรงกัน", ""
             net = inv["net"]
             self.tree.insert("", "end", tags=(tag,), values=(
                 inv["date"], name, inv["no"], inv["po"], len(inv["items"]),
                 f"{net:,.2f}" if net is not None else "-", status))
         total = sum(i["net"] or 0 for i in self.invs)
-        self.lbl_sum.config(text=f"อ่านได้ {len(self.invs)} ใบ   ยอดรวม {total:,.2f} บาท   "
-                                 f"ยอดไม่ตรง {len(bad)} ใบ")
-        missing = core.missing_addresses(self.invs, self.branches)
+        self.stat["count"].configure(text=f"{len(self.invs):,}")
+        self.stat["total"].configure(text=f"{total:,.2f}")
+        n_check = len(bad) + sum(1 for i in self.invs if i["wh_code"] in miss and i["no"] not in bad)
+        self.stat["check"].configure(text=f"{n_check:,}", text_color=OK_FG if n_check == 0 else
+                                     (BAD_FG if bad else WARN_FG))
         if missing:
-            self.lbl_warn.config(text="สาขาที่ยังไม่มีที่อยู่: " + ", ".join(f"{c} {n}" for c, n in missing))
-            self.lbl_warn.pack(side="left")
-            self.btn_goto.pack(side="right")
+            self.lbl_warn.configure(text="สาขาที่ยังไม่มีที่อยู่:  " + ",  ".join(f"{c} {n}" for c, n in missing))
+            self.warn.grid()
         else:
-            self.lbl_warn.pack_forget()
-            self.btn_goto.pack_forget()
-        self.btn_make.config(state="normal" if self.cfg_ok else "disabled")
+            self.warn.grid_remove()
+        self.btn_make.configure(state="normal" if self.cfg_ok else "disabled")
         if not self.cfg_ok:
-            self.lbl_status.config(text="ต้องกรอกแท็บ 'ตั้งค่า' ให้ครบก่อนสร้างไฟล์", foreground="#B00020")
+            self.lbl_status.configure(text="ต้องกรอกหน้า 'ตั้งค่า' ให้ครบก่อนสร้างไฟล์", text_color=BAD_FG)
 
     def make_xlsx(self):
         if not self.cfg_ok:
-            self.nb.select(self.tab_cfg)
+            self.show("config")
             return
         missing = core.missing_addresses(self.invs, self.branches)
         if missing:
@@ -172,7 +294,7 @@ class App(tk.Tk):
             if ans is None:
                 return
             if ans is False:
-                self.nb.select(self.tab_br)
+                self.show("branches")
                 return
         src = Path(self.pdf_path)
         out = filedialog.asksaveasfilename(
@@ -189,43 +311,43 @@ class App(tk.Tk):
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("สร้างไฟล์ไม่สำเร็จ", f"{type(e).__name__}: {e}")
             return
-        self.lbl_status.config(text=f"บันทึกแล้ว: {Path(out).name}", foreground="#1B7F3B")
+        self.lbl_status.configure(text=f"บันทึกแล้ว: {Path(out).name}", text_color=OK_FG)
         if messagebox.askyesno("เสร็จแล้ว", f"สร้างไฟล์เรียบร้อย\n{out}\n\nเปิดโฟลเดอร์ที่เก็บไฟล์ไหม?"):
             os.startfile(Path(out).parent)
 
-    # ------------------------------------------------------------ tab 2
+    # ------------------------------------------------------------ branches page
     def _build_branches(self):
-        f = self.tab_br
-        ttk.Label(f, text="ชื่อและที่อยู่สาขา (แสดงในใบส่งของ)", font=FONT_BIG).pack(anchor="w", padx=12, pady=(12, 4))
-        box = ttk.Frame(f)
-        box.pack(fill="both", expand=True, padx=12, pady=4)
-        self.btree = ttk.Treeview(box, columns=("code", "name", "addr"), show="headings", selectmode="browse")
-        for c, h, w in (("code", "รหัสคลัง", 80), ("name", "ชื่อสาขา", 300), ("addr", "ที่อยู่", 560)):
-            self.btree.heading(c, text=h)
-            self.btree.column(c, width=w, anchor="w")
-        sb = ttk.Scrollbar(box, orient="vertical", command=self.btree.yview)
-        self.btree.configure(yscrollcommand=sb.set)
-        self.btree.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        self.btree.tag_configure("warn", background="#FFF2CC")
+        p = self._page("branches", "สาขา", "ชื่อและที่อยู่สาขา")
+        p.rowconfigure(2, weight=1)
+        tc = card(p)
+        tc.grid(row=2, column=0, sticky="nsew", padx=32, pady=(0, 10))
+        tc.rowconfigure(0, weight=1)
+        tc.columnconfigure(0, weight=1)
+        box, self.btree = self._tree(tc, ("code", "name", "addr"), ("รหัสคลัง", "ชื่อสาขา", "ที่อยู่"),
+                                     (90, 320, 600))
+        box.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        self.btree.tag_configure("warn", background=WARN_BG, foreground=WARN_FG)
         self.btree.bind("<<TreeviewSelect>>", self._pick_branch)
 
-        form = ttk.Frame(f)
-        form.pack(fill="x", padx=12, pady=6)
+        fc = card(p)
+        fc.grid(row=3, column=0, sticky="ew", padx=32, pady=(0, 8))
+        fc.columnconfigure(1, weight=1)
         self.v_code, self.v_name, self.v_addr = tk.StringVar(), tk.StringVar(), tk.StringVar()
-        for r, (lab, var, w) in enumerate((("รหัสคลัง", self.v_code, 14), ("ชื่อสาขา", self.v_name, 60),
-                                           ("ที่อยู่", self.v_addr, 90))):
-            ttk.Label(form, text=lab).grid(row=r, column=0, sticky="w", pady=2)
-            ttk.Entry(form, textvariable=var, width=w).grid(row=r, column=1, sticky="we", pady=2, padx=6)
-        form.columnconfigure(1, weight=1)
+        for r, (lab, var, w) in enumerate((("รหัสคลัง", self.v_code, 140), ("ชื่อสาขา", self.v_name, 0),
+                                           ("ที่อยู่", self.v_addr, 0))):
+            ctk.CTkLabel(fc, text=lab, font=font(12), text_color=MUTED, anchor="w", width=80).grid(
+                row=r, column=0, sticky="w", padx=(20, 8), pady=(14 if r == 0 else 4, 4 if r < 2 else 14))
+            e = entry(fc, var, **({"width": w} if w else {}))
+            e.grid(row=r, column=1, sticky="w" if w else "ew", padx=(0, 20),
+                   pady=(14 if r == 0 else 4, 4 if r < 2 else 14))
 
-        btns = ttk.Frame(f)
-        btns.pack(fill="x", padx=12, pady=(2, 12))
-        ttk.Button(btns, text="เพิ่ม / อัปเดตแถว", command=self._upsert_branch).pack(side="left")
-        ttk.Button(btns, text="ลบแถว", command=self._delete_branch).pack(side="left", padx=6)
-        ttk.Button(btns, text="บันทึก", style="Accent.TButton", command=self._save_branches).pack(side="right")
-        self.lbl_br = ttk.Label(btns, text="", foreground="#666")
-        self.lbl_br.pack(side="right", padx=10)
+        bt = ctk.CTkFrame(p, fg_color="transparent")
+        bt.grid(row=4, column=0, sticky="ew", padx=32, pady=(0, 22))
+        ghost_btn(bt, "เพิ่ม / อัปเดตแถว", self._upsert_branch, width=160).pack(side="left")
+        ghost_btn(bt, "ลบแถว", self._delete_branch, width=100).pack(side="left", padx=8)
+        primary_btn(bt, "บันทึก", self._save_branches, width=130).pack(side="right")
+        self.lbl_br = ctk.CTkLabel(bt, text="", font=font(12), text_color=MUTED)
+        self.lbl_br.pack(side="right", padx=14)
         self._refresh_branch_tree()
 
     def _refresh_branch_tree(self):
@@ -236,9 +358,8 @@ class App(tk.Tk):
     def _pick_branch(self, _evt=None):
         sel = self.btree.selection()
         if sel:
-            code = sel[0]
-            name, addr = self.branches[code]
-            self.v_code.set(code)
+            name, addr = self.branches[sel[0]]
+            self.v_code.set(sel[0])
             self.v_name.set(name)
             self.v_addr.set(addr)
 
@@ -250,7 +371,7 @@ class App(tk.Tk):
         self.branches[code] = (self.v_name.get().strip(), self.v_addr.get().strip())
         self._refresh_branch_tree()
         self.btree.selection_set(code)
-        self.lbl_br.config(text="มีการแก้ไขที่ยังไม่ได้บันทึก", foreground="#B00020")
+        self.lbl_br.configure(text="มีการแก้ไขที่ยังไม่ได้บันทึก", text_color=WARN_FG)
         if self.invs:
             self._refresh_preview()
 
@@ -259,29 +380,33 @@ class App(tk.Tk):
         if sel and messagebox.askyesno("ลบสาขา", f"ลบสาขารหัส {sel[0]} ?"):
             self.branches.pop(sel[0], None)
             self._refresh_branch_tree()
-            self.lbl_br.config(text="มีการแก้ไขที่ยังไม่ได้บันทึก", foreground="#B00020")
+            self.lbl_br.configure(text="มีการแก้ไขที่ยังไม่ได้บันทึก", text_color=WARN_FG)
 
     def _save_branches(self):
         core.save_branches(self.branches)
-        self.lbl_br.config(text="บันทึกแล้ว", foreground="#1B7F3B")
+        self.lbl_br.configure(text="บันทึกแล้ว", text_color=OK_FG)
 
-    # ------------------------------------------------------------ tab 3
+    # ------------------------------------------------------------ config page
     def _build_config(self):
-        f = self.tab_cfg
-        ttk.Label(f, text="ข้อมูลผู้ส่งของ (พิมพ์ที่หัวใบส่งของ)", font=FONT_BIG).pack(anchor="w", padx=12, pady=(12, 8))
-        grid = ttk.Frame(f)
-        grid.pack(fill="x", padx=12)
+        p = self._page("config", "ตั้งค่า", "ข้อมูลผู้ส่งของ")
+        c = card(p)
+        c.grid(row=2, column=0, sticky="ew", padx=32, pady=(0, 10))
+        c.columnconfigure(1, weight=1)
+        ctk.CTkLabel(c, text="ข้อมูลนี้จะพิมพ์ที่หัวใบส่งของ  ·  เก็บในไฟล์ config.json ข้างโปรแกรม",
+                     font=font(12), text_color=MUTED, anchor="w").grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(16, 6))
         self.cfg_vars = {}
-        for r, (key, lab) in enumerate(CFG_LABELS):
-            ttk.Label(grid, text=lab).grid(row=r, column=0, sticky="w", pady=5)
+        for r, (key, lab) in enumerate(CFG_LABELS, 1):
+            ctk.CTkLabel(c, text=lab, font=font(12), text_color=MUTED, anchor="w", width=230).grid(
+                row=r, column=0, sticky="w", padx=(20, 8), pady=6)
             v = tk.StringVar()
-            ttk.Entry(grid, textvariable=v, width=80).grid(row=r, column=1, sticky="we", padx=8, pady=5)
+            entry(c, v).grid(row=r, column=1, sticky="ew", padx=(0, 20), pady=6)
             self.cfg_vars[key] = v
-        grid.columnconfigure(1, weight=1)
-        row = ttk.Frame(f)
-        row.pack(fill="x", padx=12, pady=12)
-        ttk.Button(row, text="บันทึกการตั้งค่า", style="Accent.TButton", command=self._save_cfg).pack(side="right")
-        self.lbl_cfg = ttk.Label(row, text="", foreground="#666")
+        ctk.CTkFrame(c, fg_color="transparent", height=10).grid(row=len(CFG_LABELS) + 1, column=0)
+        row = ctk.CTkFrame(p, fg_color="transparent")
+        row.grid(row=3, column=0, sticky="ew", padx=32)
+        primary_btn(row, "บันทึกการตั้งค่า", self._save_cfg, width=170).pack(side="right")
+        self.lbl_cfg = ctk.CTkLabel(row, text="", font=font(12), text_color=MUTED)
         self.lbl_cfg.pack(side="left")
 
     def _load_cfg(self, initial=False):
@@ -289,10 +414,9 @@ class App(tk.Tk):
             cfg = core.load_config()
         except core.ConfigError as e:
             self.cfg_ok = False
-            self.lbl_cfg.config(text=str(e), foreground="#B00020")
+            self.lbl_cfg.configure(text=str(e), text_color=BAD_FG)
             if initial:
-                self.nb.select(self.tab_cfg)
-            # ถ้ามีไฟล์แต่ค่าไม่ครบ ให้เติมช่องที่มีไว้ก่อน
+                self.show("config")
             try:
                 import json
                 with open(core.CONFIG_JSON, encoding="utf-8-sig") as fh:
@@ -306,7 +430,7 @@ class App(tk.Tk):
             v.set(cfg[k])
         core.apply_config(cfg)
         self.cfg_ok = True
-        self.lbl_cfg.config(text="โหลดการตั้งค่าแล้ว", foreground="#666")
+        self.lbl_cfg.configure(text="โหลดการตั้งค่าแล้ว", text_color=MUTED)
 
     def _save_cfg(self):
         cfg = {k: v.get().strip() for k, v in self.cfg_vars.items()}
@@ -317,10 +441,10 @@ class App(tk.Tk):
         core.save_config(cfg)
         core.apply_config(cfg)
         self.cfg_ok = True
-        self.lbl_cfg.config(text="บันทึกแล้ว", foreground="#1B7F3B")
-        self.lbl_status.config(text="", foreground="#666")
+        self.lbl_cfg.configure(text="บันทึกแล้ว", text_color=OK_FG)
+        self.lbl_status.configure(text="")
         if self.invs:
-            self.btn_make.config(state="normal")
+            self.btn_make.configure(state="normal")
 
 
 if __name__ == "__main__":

@@ -45,13 +45,15 @@ pip install -r requirements.txt
 
 ### แบบหน้าต่างโปรแกรม (แนะนำ)
 
+ธีม Dark สไตล์ Quantix (customtkinter): แถบเมนูซ้าย, การ์ดสรุป, ตารางตรวจรายการ
+
 ```bash
 python app_gui.py          # หรือดับเบิลคลิก InvoiceToXlsx.exe ถ้า build แล้ว
 ```
 
-1. แท็บ **สกัดเอกสาร** กด "เลือกไฟล์ PDF…" แล้วดูตารางตรวจรายการ (แถวแดง = ยอดไม่ตรง, แถวเหลือง = สาขายังไม่มีที่อยู่)
+1. หน้า **สกัดเอกสาร** กด "เลือกไฟล์ PDF…" แล้วดูการ์ดสรุป (จำนวนใบ, ยอดรวม, ต้องตรวจ) และตารางตรวจรายการ (แถวแดง = ยอดไม่ตรง, แถวเหลือง = สาขายังไม่มีที่อยู่)
 2. กด "สร้างไฟล์ .xlsx…" ถ้ามีสาขาที่ไม่มีที่อยู่ โปรแกรมจะเตือนก่อนสร้าง
-3. แท็บ **สาขา** แก้ชื่อ/ที่อยู่สาขา (บันทึกลง `branches.csv`) และแท็บ **ตั้งค่า** แก้ข้อมูลผู้ส่งของ (บันทึกลง `config.json`)
+3. หน้า **สาขา** แก้ชื่อ/ที่อยู่สาขา (บันทึกลง `branches.csv`) และหน้า **ตั้งค่า** แก้ข้อมูลผู้ส่งของ (บันทึกลง `config.json`)
 
 ### แบบบรรทัดคำสั่ง
 
@@ -79,7 +81,7 @@ python invoice_to_xlsx.py "ไฟล์.pdf" -o "ผลลัพธ์.xlsx"
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconfirm --onefile --windowed --name InvoiceToXlsx --paths . app_gui.py
+pyinstaller --noconfirm --onefile --windowed --name InvoiceToXlsx --paths . --collect-all customtkinter app_gui.py
 ```
 
 ได้ไฟล์ `dist/InvoiceToXlsx.exe` ให้วาง `config.json` และ `branches.csv` ไว้โฟลเดอร์เดียวกับ `.exe`

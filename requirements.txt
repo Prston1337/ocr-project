@@ -2,4 +2,5 @@ pymupdf
 openpyxl
 pytesseract
 pillow
+customtkinter
 # สำหรับ build .exe เท่านั้น: pyinstaller
