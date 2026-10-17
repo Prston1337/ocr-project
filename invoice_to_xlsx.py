@@ -251,55 +251,107 @@ def detail_sheet(ws, invs):
     ws.freeze_panes = "A2"
 
 
-BRANCH_CSV = Path(__file__).with_name("branches.csv")
 BLUE = "2E96D0"
-CONFIG_JSON = Path(__file__).with_name("config.json")
+CONFIG_KEYS = ("sender_name", "sender_address", "sender_tax_id", "deliverer_name", "customer_company")
+
+
+def app_dir():
+    """โฟลเดอร์ที่เก็บ config.json / branches.csv (ข้าง .exe หรือข้างสคริปต์)"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+BRANCH_CSV = app_dir() / "branches.csv"
+CONFIG_JSON = app_dir() / "config.json"
+
+
+class ConfigError(Exception):
+    pass
 
 
 def load_config():
-    """อ่านข้อมูลผู้ส่งของจาก config.json (ไม่เก็บใน git) ถ้าไม่มีไฟล์จะแจ้งวิธีสร้าง"""
+    """อ่านข้อมูลผู้ส่งของจาก config.json (ไม่เก็บใน git)"""
     import json
     if not CONFIG_JSON.exists():
-        sys.exit("ไม่พบ config.json  ให้ก๊อป config.example.json เป็น config.json แล้วแก้ข้อมูลให้ถูกต้อง")
+        raise ConfigError("ไม่พบ config.json  ให้ตั้งค่าในแท็บ 'ตั้งค่า' หรือก๊อป config.example.json เป็น config.json")
     with open(CONFIG_JSON, encoding="utf-8-sig") as f:
         cfg = json.load(f)
-    missing = [k for k in ("sender_name", "sender_address", "sender_tax_id",
-                           "deliverer_name", "customer_company") if not cfg.get(k)]
+    missing = [k for k in CONFIG_KEYS if not str(cfg.get(k, "")).strip()]
     if missing:
-        sys.exit("config.json ยังไม่มีค่า: " + ", ".join(missing))
+        raise ConfigError("config.json ยังไม่มีค่า: " + ", ".join(missing))
     return cfg
 
 
-CFG = load_config()
-SENDER_NAME = CFG["sender_name"]
-SENDER_ADDR = CFG["sender_address"]
-SENDER_TAX_ID = CFG["sender_tax_id"]
-DELIVERER_NAME = CFG["deliverer_name"]
-CUSTOMER_COMPANY = CFG["customer_company"]
+def save_config(cfg):
+    import json
+    with open(CONFIG_JSON, "w", encoding="utf-8-sig") as f:
+        json.dump({k: cfg.get(k, "") for k in CONFIG_KEYS}, f, ensure_ascii=False, indent=2)
+
+
+SENDER_NAME = SENDER_ADDR = SENDER_TAX_ID = DELIVERER_NAME = CUSTOMER_COMPANY = ""
+
+
+def apply_config(cfg):
+    global SENDER_NAME, SENDER_ADDR, SENDER_TAX_ID, DELIVERER_NAME, CUSTOMER_COMPANY
+    SENDER_NAME, SENDER_ADDR = cfg["sender_name"], cfg["sender_address"]
+    SENDER_TAX_ID, DELIVERER_NAME = cfg["sender_tax_id"], cfg["deliverer_name"]
+    CUSTOMER_COMPANY = cfg["customer_company"]
+
+
 ROWS_PER_PAGE = 16   # จำนวนรายการสินค้าต่อหน้า A4
 BLOCK = 34           # จำนวนแถวต่อ 1 หน้า
 
 
-def load_branches(invs):
-    """อ่าน branches.csv (รหัสคลัง,ชื่อสาขา,ที่อยู่) ถ้ายังไม่มีไฟล์ จะสร้างให้พร้อมรหัสที่พบ"""
+def read_branches():
+    """อ่าน branches.csv -> {รหัสคลัง: (ชื่อสาขา, ที่อยู่)}"""
     import csv
     data = {}
     if BRANCH_CSV.exists():
         with open(BRANCH_CSV, encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
                 data[row["รหัสคลัง"].strip()] = (row["ชื่อสาขา"].strip(), row["ที่อยู่"].strip())
+    return data
+
+
+def save_branches(data):
+    import csv
+    with open(BRANCH_CSV, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["รหัสคลัง", "ชื่อสาขา", "ที่อยู่"])
+        for k, (n, a) in data.items():
+            w.writerow([k, n, a])
+
+
+def load_branches(invs):
+    """อ่าน branches.csv แล้วเติมรหัสคลังใหม่ที่พบใน PDF (ใช้ชื่อจาก PDF, ที่อยู่ว่าง) พร้อมบันทึก"""
+    data = read_branches()
     changed = False
     for i in invs:
         if i["wh_code"] not in data:
             data[i["wh_code"]] = (i["branch"], "")
             changed = True
     if changed or not BRANCH_CSV.exists():
-        with open(BRANCH_CSV, "w", encoding="utf-8-sig", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["รหัสคลัง", "ชื่อสาขา", "ที่อยู่"])
-            for k, (n, a) in data.items():
-                w.writerow([k, n, a])
+        save_branches(data)
     return data
+
+
+def missing_addresses(invs, branches):
+    """รายการ (รหัส, ชื่อ) ของสาขาที่พบใน PDF แต่ยังไม่มีที่อยู่"""
+    seen, out = set(), []
+    for i in invs:
+        code = i["wh_code"]
+        name, addr = branches.get(code, (i["branch"], ""))
+        if code not in seen and not addr.strip():
+            out.append((code, name))
+        seen.add(code)
+    return out
+
+
+def mismatched(invs):
+    """เลขที่ใบที่ยอดสุทธิไม่ตรงกับผลรวมรายการ"""
+    return [i["no"] for i in invs if i["net"] is None or
+            abs(sum(num(x["amount"]) or 0 for x in i["items"]) - i["net"]) > 0.005]
 
 
 def delivery_sheet(ws, invs, branches, copy_label):
@@ -417,34 +469,21 @@ def main():
     ap.add_argument("pdf")
     ap.add_argument("-o", "--out")
     a = ap.parse_args()
+    try:
+        apply_config(load_config())
+    except ConfigError as e:
+        sys.exit(str(e))
     out = a.out or str(Path(a.pdf).with_suffix(".xlsx"))
     invs = read_invoices(a.pdf)
     if not invs:
         sys.exit("ไม่พบใบรับสินค้าในไฟล์")
     build(invs, out)
-    bad = [i["no"] for i in invs if i["net"] is None or
-           abs(sum(num(x["amount"]) or 0 for x in i["items"]) - i["net"]) > 0.005]
+    bad = mismatched(invs)
     print(f"อ่านได้ {len(invs)} ใบ  ยอดรวม {sum(i['net'] or 0 for i in invs):,.2f} บาท -> {out}")
     print("ยอดไม่ตรง (ตรวจด้วยตา): " + (", ".join(bad) if bad else "ไม่มี"))
+    for code, name in missing_addresses(invs, read_branches()):
+        print(f"คำเตือน: สาขา {code} {name} ยังไม่มีที่อยู่ใน branches.csv")
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

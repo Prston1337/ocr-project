@@ -2,3 +2,4 @@ pymupdf
 openpyxl
 pytesseract
 pillow
+# สำหรับ build .exe เท่านั้น: pyinstaller
