@@ -1,4 +1,4 @@
-﻿"""สกัดใบรับสินค้า (PDF) -> ไฟล์ .xlsx ใบวางบิล 2 ชุด + รายการสินค้า
+"""สกัดใบรับสินค้า (PDF) -> ไฟล์ .xlsx ใบวางบิล 2 ชุด + รายการสินค้า
 
 วิธีใช้:  python invoice_to_xlsx.py "ไฟล์.pdf" [-o ผลลัพธ์.xlsx]
 - PDF ที่มี text layer: อ่านตำแหน่งคำโดยตรง (แม่นยำกว่า OCR)
@@ -193,7 +193,7 @@ def bill_sheet(ws, invs, copy_label, branches=None):
         ws.cell(r, 1, k).font = Font(name=FONT, size=11, bold=True)
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
         ws.cell(r, 3, v).font = Font(name=FONT, size=11)
-    hdr = ["ลำดับ", "วันที่รับ", "สาขา", "เลขที่ใบรับสินค้า", "อ้างถึงใบสั่งซื้อ", "ใบแจ้งหนี้อ้างอิง", "จำนวนเงิน (บาท)"]
+    hdr = ["ลำดับ", "วันที่รับ", "สาขา", "เลขที่ใบรับ", "อ้างอิง PO", "ใบแจ้งหนี้", "จำนวนเงิน"]
     r0 = 7
     for c, h in enumerate(hdr, 1):
         cell = ws.cell(r0, c, h)
@@ -216,12 +216,12 @@ def bill_sheet(ws, invs, copy_label, branches=None):
     t.font, t.border, t.number_format = Font(name=FONT, size=11, bold=True), BOX, "#,##0.00"
     ws.cell(tr + 3, 2, "ผู้วางบิล ____________________").font = Font(name=FONT, size=11)
     ws.cell(tr + 3, 5, "ผู้รับวางบิล ____________________").font = Font(name=FONT, size=11)
-    for col, w in zip("ABCDEFG", [8, 14, 30, 20, 20, 22, 16]):
+    for col, w in zip("ABCDEFG", [6, 11, 18, 15, 15, 18, 12]):
         ws.column_dimensions[col].width = w
     ws.page_setup.orientation, ws.page_setup.paperSize = "portrait", ws.PAPERSIZE_A4
     ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_margins = PageMargins(left=0.5, right=0.5, top=0.6, bottom=0.6)
+    ws.page_margins = PageMargins(left=0.4, right=0.4, top=0.6, bottom=0.6)
 
 
 def detail_sheet(ws, invs):
@@ -357,7 +357,7 @@ def mismatched(invs):
 def delivery_sheet(ws, invs, branches, copy_label):
     """ใบส่งของ A4 ใบละ 1 หน้า (ตามแบบ Flowaccount) ไม่มีที่อยู่/ชื่อร้านผู้ขาย"""
     ws.sheet_view.showGridLines = False
-    for col, w in zip("ABCDEFG", [6, 13, 40, 10, 10, 14, 16]):
+    for col, w in zip("ABCDEFG", [5, 10, 38, 8, 8, 12, 17]):
         ws.column_dimensions[col].width = w
     blue = Font(name=FONT, size=10, color=BLUE)
     black = Font(name=FONT, size=11)
@@ -441,7 +441,7 @@ def delivery_sheet(ws, invs, branches, copy_label):
     ws.page_setup.orientation, ws.page_setup.paperSize = "portrait", ws.PAPERSIZE_A4
     ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_margins = PageMargins(left=0.5, right=0.5, top=0.5, bottom=0.5)
+    ws.page_margins = PageMargins(left=0.4, right=0.4, top=0.5, bottom=0.5)
 
 
 def build(invs, out):
@@ -487,3 +487,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+

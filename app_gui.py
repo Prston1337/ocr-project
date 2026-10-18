@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 import customtkinter as ctk
 
 import invoice_to_xlsx as core
+import pdf_export
 
 # ---- design tokens (ตามธีม Dark ที่ตกลงไว้) ----
 BG = "#08080B"
@@ -210,6 +211,9 @@ class App(ctk.CTk):
         self.btn_make = primary_btn(bottom, "สร้างไฟล์ .xlsx…", self.make_xlsx, width=190)
         self.btn_make.pack(side="right")
         self.btn_make.configure(state="disabled")
+        self.btn_pdf = ghost_btn(bottom, "สร้าง PDF พร้อมพิมพ์…", self.make_pdf, width=210)
+        self.btn_pdf.pack(side="right", padx=(0, 10))
+        self.btn_pdf.configure(state="disabled")
         self.lbl_status = ctk.CTkLabel(bottom, text="", font=font(12), text_color=MUTED)
         self.lbl_status.pack(side="left")
 
@@ -222,6 +226,7 @@ class App(ctk.CTk):
             return
         self.lbl_status.configure(text="กำลังอ่านไฟล์…", text_color=MUTED)
         self.btn_make.configure(state="disabled")
+        self.btn_pdf.configure(state="disabled")
         self.update_idletasks()
         threading.Thread(target=self._read_thread, args=(path,), daemon=True).start()
 
@@ -277,25 +282,67 @@ class App(ctk.CTk):
         else:
             self.warn.grid_remove()
         self.btn_make.configure(state="normal" if self.cfg_ok else "disabled")
+        self.btn_pdf.configure(state="normal" if self.cfg_ok else "disabled")
         if not self.cfg_ok:
             self.lbl_status.configure(text="ต้องกรอกหน้า 'ตั้งค่า' ให้ครบก่อนสร้างไฟล์", text_color=BAD_FG)
+
+    def _confirm_missing(self):
+        """เตือนถ้ามีสาขาไม่มีที่อยู่ คืน True ถ้าให้สร้างต่อ"""
+        missing = core.missing_addresses(self.invs, self.branches)
+        if not missing:
+            return True
+        names = "\n".join(f"  • {c} {n}" for c, n in missing)
+        ans = messagebox.askyesnocancel(
+            "มีสาขาที่ยังไม่มีที่อยู่",
+            f"สาขาต่อไปนี้ยังไม่มีที่อยู่ ใบส่งของของสาขานี้จะไม่มีที่อยู่:\n{names}\n\n"
+            "ใช่ = สร้างไฟล์ต่อ (เว้นที่อยู่ว่าง)\nไม่ = ไปกรอกที่อยู่ก่อน\nยกเลิก = กลับ")
+        if ans is False:
+            self.show("branches")
+        return ans is True
+
+    def make_pdf(self):
+        """ส่งออก PDF (ใบวางบิล + ใบส่งของ) แบ่งหน้า A4 ตายตัว ไม่ต้องใช้ Excel"""
+        if not self.cfg_ok:
+            self.show("config")
+            return
+        if not self._confirm_missing():
+            return
+        src = Path(self.pdf_path)
+        out = filedialog.asksaveasfilename(
+            title="บันทึก PDF (จะได้ 2 ไฟล์: ใบวางบิล และ ใบส่งของ)", initialdir=str(src.parent),
+            initialfile=src.stem + ".pdf", defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+        if not out:
+            return
+        core.save_branches(self.branches)
+        self.lbl_status.configure(text="กำลังสร้าง PDF… (ประมาณ 10 วินาที)", text_color=MUTED)
+        self.btn_pdf.configure(state="disabled")
+        threading.Thread(target=self._pdf_thread, args=(out,), daemon=True).start()
+
+    def _pdf_thread(self, out):
+        try:
+            files, err = pdf_export.export_pdfs(self.invs, out), None
+        except Exception as e:  # noqa: BLE001
+            files, err = [], e
+        self.after(0, self._pdf_done, files, err)
+
+    def _pdf_done(self, files, err):
+        self.btn_pdf.configure(state="normal")
+        if err is not None:
+            self.lbl_status.configure(text="สร้าง PDF ไม่สำเร็จ", text_color=BAD_FG)
+            messagebox.showerror("สร้าง PDF ไม่สำเร็จ", f"{type(err).__name__}: {err}")
+            return
+        self.lbl_status.configure(text="สร้าง PDF แล้ว: " + ", ".join(Path(f).name for f in files),
+                                  text_color=OK_FG)
+        if messagebox.askyesno("เสร็จแล้ว", "สร้าง PDF เรียบร้อย\n" + "\n".join(files) +
+                               "\n\nเปิดโฟลเดอร์ที่เก็บไฟล์ไหม?"):
+            os.startfile(Path(files[0]).parent)
 
     def make_xlsx(self):
         if not self.cfg_ok:
             self.show("config")
             return
-        missing = core.missing_addresses(self.invs, self.branches)
-        if missing:
-            names = "\n".join(f"  • {c} {n}" for c, n in missing)
-            ans = messagebox.askyesnocancel(
-                "มีสาขาที่ยังไม่มีที่อยู่",
-                f"สาขาต่อไปนี้ยังไม่มีที่อยู่ ใบส่งของของสาขานี้จะไม่มีที่อยู่:\n{names}\n\n"
-                "ใช่ = สร้างไฟล์ต่อ (เว้นที่อยู่ว่าง)\nไม่ = ไปกรอกที่อยู่ก่อน\nยกเลิก = กลับ")
-            if ans is None:
-                return
-            if ans is False:
-                self.show("branches")
-                return
+        if not self._confirm_missing():
+            return
         src = Path(self.pdf_path)
         out = filedialog.asksaveasfilename(
             title="บันทึกไฟล์ .xlsx", initialdir=str(src.parent), initialfile=src.stem + ".xlsx",
@@ -445,7 +492,9 @@ class App(ctk.CTk):
         self.lbl_status.configure(text="")
         if self.invs:
             self.btn_make.configure(state="normal")
+            self.btn_pdf.configure(state="normal")
 
 
 if __name__ == "__main__":
     App().mainloop()
+
