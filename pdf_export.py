@@ -4,6 +4,7 @@
 """
 import html
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -160,15 +161,29 @@ def find_browser():
     return None
 
 
+def _purge_old_temp(max_age_s=3600):
+    """ลบโฟลเดอร์ชั่วคราวของ Edge ที่ค้างจากรอบก่อน (ลบไม่ได้ก็ข้าม ไม่ให้กระทบงาน)"""
+    root = Path(tempfile.gettempdir())
+    now = time.time()
+    for d in root.glob("invx_*"):
+        try:
+            if now - d.stat().st_mtime > max_age_s:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
 def html_to_pdf(body, out_pdf):
     browser = find_browser()
     if not browser:
         raise RuntimeError("ไม่พบ Microsoft Edge/Chrome ในเครื่อง จึงสร้าง PDF ไม่ได้")
     out_pdf = str(Path(out_pdf))  # ปรับ / เป็น \\ ให้เป็นรูปแบบ Windows
     Path(out_pdf).unlink(missing_ok=True)
+    _purge_old_temp()
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("_PYI", "_MEI", "PYTHON", "TCL_", "TK_", "PYINSTALLER"))}
-    with tempfile.TemporaryDirectory() as tmp:
+    tmp = tempfile.mkdtemp(prefix="invx_")
+    try:
         src = Path(tmp) / "doc.html"
         src.write_text(f"<!doctype html><html lang='th'><head><meta charset='utf-8'><style>{CSS}</style></head>"
                        f"<body>{body}</body></html>", encoding="utf-8")
@@ -188,6 +203,10 @@ def html_to_pdf(body, out_pdf):
                     return
                 time.sleep(0.25)
         raise RuntimeError("สร้างไฟล์ PDF ไม่สำเร็จ\n" + "\n".join(log) + f"\nปลายทาง: {out_pdf}")
+    finally:
+        # Edge อาจยังมีโปรเซสลูกถือไฟล์ในโฟลเดอร์ชั่วคราวอยู่ ลบไม่ได้ก็ปล่อยไว้ (รอบหน้าจะลบให้) ห้ามทำให้งานล้ม
+        time.sleep(0.5)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def export_pdfs(invs, base_path):
