@@ -326,7 +326,7 @@ class App(ctk.CTk):
         if not out:
             return
         core.save_branches(self.branches)
-        self.lbl_status.configure(text="กำลังสร้าง PDF… (ประมาณ 10 วินาที)", text_color=MUTED)
+        self.lbl_status.configure(text="กำลังสร้าง PDF… (ไฟล์ใหญ่อาจใช้ 30-60 วินาที กรุณารอ)", text_color=MUTED)
         self.btn_pdf.configure(state="disabled")
         threading.Thread(target=self._pdf_thread, args=(out,), daemon=True).start()
 
@@ -731,6 +731,34 @@ class App(ctk.CTk):
             self.btn_pdf.configure(state="normal")
 
 
+def _selftest_pdf(out):
+    """รันจาก .exe: InvoiceToXlsx.exe --selftest-pdf <ไฟล์ผลลัพธ์.pdf> เขียนผลลง <ไฟล์>.log"""
+    log = Path(out).with_suffix(".log")
+    try:
+        pdf_export.html_to_pdf("<div class='page'><h1>ทดสอบ PDF</h1></div>", out)
+        log.write_text("OK\n", encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        log.write_text(f"FAILED {type(e).__name__}: {e}\n", encoding="utf-8")
+
+
+def _selftest_full(pdf, out):
+    """รันจาก .exe: --selftest-full <ใบรับสินค้า.pdf> <ไฟล์ผลลัพธ์.pdf>  ทดสอบสกัด+สร้าง PDF จริง เขียนผลลง .log"""
+    log = Path(out).with_suffix(".log")
+    try:
+        core.apply_config(core.load_config())
+        invs = core.read_invoices(pdf)
+        files = pdf_export.export_pdfs(invs, out)
+        log.write_text("OK " + str(len(invs)) + " invoices -> " + " | ".join(files) + "\n", encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        log.write_text(f"FAILED {type(e).__name__}: {e}\n", encoding="utf-8")
+
+
 if __name__ == "__main__":
-    App().mainloop()
+    import sys
+    if len(sys.argv) >= 4 and sys.argv[1] == "--selftest-full":
+        _selftest_full(sys.argv[2], sys.argv[3])
+    elif len(sys.argv) >= 3 and sys.argv[1] == "--selftest-pdf":
+        _selftest_pdf(sys.argv[2])
+    else:
+        App().mainloop()
 

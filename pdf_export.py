@@ -3,8 +3,10 @@
 ใช้เมื่อไม่มี Excel: PDF แบ่งหน้าเหมือนกันทุกเครื่อง ไม่ขึ้นกับ Google Sheets/Excel
 """
 import html
+import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import invoice_to_xlsx as core
@@ -162,16 +164,30 @@ def html_to_pdf(body, out_pdf):
     browser = find_browser()
     if not browser:
         raise RuntimeError("ไม่พบ Microsoft Edge/Chrome ในเครื่อง จึงสร้าง PDF ไม่ได้")
+    out_pdf = str(Path(out_pdf))  # ปรับ / เป็น \\ ให้เป็นรูปแบบ Windows
+    Path(out_pdf).unlink(missing_ok=True)
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("_PYI", "_MEI", "PYTHON", "TCL_", "TK_", "PYINSTALLER"))}
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "doc.html"
         src.write_text(f"<!doctype html><html lang='th'><head><meta charset='utf-8'><style>{CSS}</style></head>"
                        f"<body>{body}</body></html>", encoding="utf-8")
-        cmd = [browser, "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
-               f"--user-data-dir={Path(tmp) / 'profile'}", f"--print-to-pdf={out_pdf}", src.as_uri()]
-        subprocess.run(cmd, check=True, timeout=120, creationflags=0x08000000,  # CREATE_NO_WINDOW
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if not Path(out_pdf).exists():
-        raise RuntimeError("สร้างไฟล์ PDF ไม่สำเร็จ")
+        log = []
+        for mode in ("--headless=new", "--headless"):
+            cmd = [browser, mode, "--disable-gpu", "--no-sandbox", "--no-pdf-header-footer",
+                   "--disable-extensions", "--no-first-run",
+                   f"--user-data-dir={Path(tmp) / ('profile' + mode[-3:])}", f"--print-to-pdf={out_pdf}", src.as_uri()]
+            try:
+                r = subprocess.run(cmd, timeout=120, creationflags=0x08000000, env=env,
+                                   stdin=subprocess.DEVNULL, capture_output=True)
+                log.append(f"{mode}: exit={r.returncode} err={r.stderr.decode('utf-8', 'replace')[-300:].strip()}")
+            except subprocess.TimeoutExpired:
+                log.append(f"{mode}: timeout")
+            for _ in range(40):  # รอไฟล์ถูกเขียนสูงสุด ~10 วินาที
+                if Path(out_pdf).exists() and Path(out_pdf).stat().st_size > 0:
+                    return
+                time.sleep(0.25)
+        raise RuntimeError("สร้างไฟล์ PDF ไม่สำเร็จ\n" + "\n".join(log) + f"\nปลายทาง: {out_pdf}")
 
 
 def export_pdfs(invs, base_path):
